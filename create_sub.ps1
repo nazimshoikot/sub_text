@@ -1,9 +1,1 @@
-python .\main.py --video="C:\nazim\Projects\machine_mindset\Youtube\Times_PTE\Mahatma_Gandhi\v1.mp4" `
---srt="C:\nazim\Projects\machine_mindset\Youtube\Times_PTE\Mahatma_Gandhi\captions_long.srt" `
---out_dir="C:\nazim\Projects\machine_mindset\Youtube\Times_PTE\Mahatma_Gandhi" `
---sub_color="0,0,0" `
---x_disp=20 `
---y_disp=100 `
---text_size=0.6 `
---text_thickness=1 `
---debug=1
+python .\main.py

@@ -1,11 +1,36 @@
 from os import path
 from datetime import datetime
 import os
-import argparse
 import sys
 
 import cv2
-import pysrt
+
+from sub_config import VIDEO_FILE, SRT_FILE, OUT_DIR, DIVIDE_LINES, SUB_COLOR, BORDER_COLOR, X_DISP, Y_DISP, \
+    TEXT_SIZE, TEXT_THICKNESS, FONT_FACE, DEBUG, DELAY_SUB_TIME
+
+
+def process_args():
+    vid = VIDEO_FILE
+    srt = SRT_FILE
+    out_dir = OUT_DIR
+    
+    # check that the filepath exists
+    for filepath in [vid, srt, out_dir]:
+        if not path.exists(filepath):
+            print(f"{filepath} does not exist")
+            sys.exit(1)
+    
+    # get displacements
+    x_disp = X_DISP
+    y_disp = Y_DISP
+    text_size = TEXT_SIZE
+    text_thickness = TEXT_THICKNESS
+    for val in [x_disp, y_disp, text_thickness]:
+        assert isinstance(val, int), f"{val} is not integer"
+    for val in [text_size]:
+        assert isinstance(val, float), f"{val} is not flot"
+
+    return vid, srt, out_dir, x_disp, y_disp, text_size, text_thickness
 
 def get_timestamp_from_str(str):
     split = str.split(",")
@@ -58,7 +83,20 @@ def parse_srt(filepath):
                     break
                 # insert info
                 j += 1
-                all_lines.append(sub_line)            
+                all_lines.append(sub_line)
+
+            # divide lines into shorter lines if needed
+            if DIVIDE_LINES:
+                new_lines = []
+                for orig_line in all_lines:
+                    words = orig_line.split(" ")
+                    if len(words) <= 3:
+                        new_lines.append(orig_line)
+                    else:
+                        divide_ind = len(words) // 2
+                        new_lines.append(" ".join(words[:divide_ind]))
+                        new_lines.append(" ".join(words[divide_ind:]))
+                all_lines = new_lines
             subs.append([line, [start_time, end_time], all_lines])
 
             # increment idx
@@ -68,53 +106,48 @@ def parse_srt(filepath):
     return subs
 
 text_height = 50
-def draw_subtitle(frame, texts, font_scale, font_thickness, font_face, 
-                  color, x_disp, y_disp):
+def draw_subtitle(frame, texts):
     for i, text in enumerate(texts):
         # text_size, _ = cv2.getTextSize(text, font_face, font_scale, font_thickness)
         # cv2.rectangle(frame, (x, y - text_size[1]), (x + text_size[0], y + text_size[1] // 2), (0, 0, 0), -1)
-        text_size = cv2.getTextSize(text, font_face, font_scale, font_thickness)[0]
+        text_size = cv2.getTextSize(text, FONT_FACE, TEXT_SIZE, TEXT_THICKNESS)[0]
         frame_y, frame_x = frame.shape[0], frame.shape[1]
-        text_x = int((frame_x - text_size[0]) / 2) + x_disp
+        text_x = int((frame_x - text_size[0]) / 2) + X_DISP
         num_text = len(texts)
         if num_text > 1:
-            text_y = int(frame_y * 0.5 - num_text * text_height/2 + i * text_height) + y_disp
+            text_y = int(frame_y * 0.5 - num_text * text_height/2 + i * text_height) + Y_DISP
         else:
-            text_y = int(frame_y * 0.5) + y_disp
+            text_y = int(frame_y * 0.5) + Y_DISP
 
-        # write text
-        # print("TextL ", f"---{text}---", text == " ")
-        # text = text.strip(" ").strip("\n").strip("Â")
-        # text = text.decode('utf-8', 'ignore')
         for c in text:
             if not c.isascii():
                 text = text.replace(c, "")
-        cv2.putText(frame, text, (text_x, text_y), font_face, font_scale, color, font_thickness, cv2.LINE_AA)
+        # draw text border
+        cv2.putText(frame, text, (text_x, text_y), FONT_FACE, TEXT_SIZE, BORDER_COLOR, TEXT_THICKNESS + 1, cv2.LINE_AA)
+        # draw text
+        cv2.putText(frame, text, (text_x, text_y), FONT_FACE, TEXT_SIZE, SUB_COLOR, TEXT_THICKNESS, cv2.LINE_AA)
 
-def main(video_path, srt_path, out_dir, sub_colors, x_disp, y_disp, text_size, text_thickness, debug):
-    for filepath in [video_path, srt_path, out_dir]:
-        assert os.path.exists(filepath), f"{filepath} does not exist"
-
+def main():
 
     # get input video info
-    cap = cv2.VideoCapture(video_path)
+    cap = cv2.VideoCapture(VIDEO_FILE)
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     
     # create output video
-    input_file = path.basename(video_path).split(".")[0]
-    tmp_output_path = path.join(out_dir, f"tmp.mp4")
+    input_file = path.basename(VIDEO_FILE).split(".")[0]
+    tmp_output_path = path.join(OUT_DIR, f"tmp.mp4")
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(tmp_output_path, fourcc, fps, (width, height))
 
     # get subs
-    subs = parse_srt(srt_path)
+    subs = parse_srt(SRT_FILE)
     
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_count = 0
     while cap.isOpened():
-        if debug and frame_count >= 1000:
+        if DEBUG and frame_count >= 1000:
             break
         ret, frame = cap.read()
         if not ret:
@@ -124,11 +157,11 @@ def main(video_path, srt_path, out_dir, sub_colors, x_disp, y_disp, text_size, t
         for i in range(len(subs)):
             sub = subs[-i]
             sub_idx, times, texts = sub
-            start_time = times[0]
-            end_time = times[1]
+            start_time = times[0] + DELAY_SUB_TIME
+            end_time = times[1] + DELAY_SUB_TIME
             
             if start_time <= current_time_ms  and end_time >= current_time_ms:
-                draw_subtitle(frame, texts, text_size, text_thickness, cv2.FONT_HERSHEY_COMPLEX, sub_colors, x_disp, y_disp)
+                draw_subtitle(frame, texts)
                 break
 
         out.write(frame)
@@ -142,54 +175,12 @@ def main(video_path, srt_path, out_dir, sub_colors, x_disp, y_disp, text_size, t
     out.release()
 
     # put the audio back in it
-    output_path = path.join(out_dir, f"{input_file}_final.mp4")
-    os.system(f'ffmpeg -y -i {tmp_output_path} -i {video_path} -c copy -map 0:v:0 -map 1:a:0 {output_path}')
+    output_path = path.join(OUT_DIR, f"{input_file}_final.mp4")
+    os.system(f'ffmpeg -y -i {tmp_output_path} -i {VIDEO_FILE} -c copy -map 0:v:0 -map 1:a:0 {output_path}')
 
     # remove the temp file
     os.remove(tmp_output_path)
     print("Finished conversion")
-
-def process_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--video", help="Path to input video", required=True)
-    parser.add_argument("--srt", help="Path to srt file", required=True)
-    parser.add_argument("--out_dir", help="Path to srt file", required=True)
-    parser.add_argument("--sub_color", help="comma separated values of rgb", required=True)
-    parser.add_argument("--text_size", help="how much the subtitles should be moved to left from the center", type=float, required=True)
-    parser.add_argument("--text_thickness", help="how much the subtitles should be moved to left from the center", type=int, required=True)
-    parser.add_argument("--x_disp", help="how much the subtitles should be moved to left from the center", type=int, required=True)
-    parser.add_argument("--y_disp", help="how much the subtitles should be moved to bottom from the center", type=int, required=True)
-    parser.add_argument("--debug", help="debugging mode", type=int, required=True)
-    args = parser.parse_args()
-    vid = args.video
-    srt = args.srt
-    out_dir = args.out_dir
-    
-    # check that the filepath exists
-    for filepath in [vid, srt, out_dir]:
-        if not path.exists(filepath):
-            print(f"{filepath} does not exist")
-            sys.exit(1)
-    
-    # create rgb tuple
-    sub_colors = args.sub_color.split(",")
-    r,g,b = sub_colors
-    colors = (int(b), int(g), int(r))
-
-    # get displacements
-    x_disp = args.x_disp
-    y_disp = args.y_disp
-    text_size = args.text_size
-    text_thickness = args.text_thickness
-    for val in [x_disp, y_disp, text_thickness]:
-        assert isinstance(val, int), f"{val} is not integer"
-    for val in [text_size]:
-        assert isinstance(val, float), f"{val} is not flot"
-
-    # set debugging mode
-    debug = True if "debug" in args and args.debug == 1 else False
-
-    return vid, srt, out_dir, colors, x_disp, y_disp, text_size, text_thickness, debug
 
 if __name__ == "__main__":
     # video_path = "C:\nazim\Projects\Machine Mindset\Youtube\GOT\E1\S09E01_NO_SUB.mp4"
@@ -199,5 +190,5 @@ if __name__ == "__main__":
     # srt_path = "files/captions.srt"
     # out_dir = "files"
     # parse_srt(srt_path)
-    vid_path, srt_path, out_dir, sub_colors, x_disp, y_disp, text_size, text_thickness, debug = process_args()
-    main(vid_path, srt_path, out_dir, sub_colors, x_disp, y_disp, text_size, text_thickness, debug)
+    process_args()
+    main()
