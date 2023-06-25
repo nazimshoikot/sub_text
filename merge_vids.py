@@ -3,34 +3,61 @@ import os
 import cv2
 import numpy as np
 
-from vid_merge_config import VID_1, VID_2, VID_3, VID_4, OUTPUT_PATH, IS_SHORT, VID_LEN, FPS
+from configs.vid_merge_config import VID_1, VID_2, VID_3, VID_4, OUTPUT_PATH, IS_SHORT, VID_LEN, FPS, DEBUG, CHANGE_DELAY
 
-def stack_videos(videos, grid=(2, 2), output='output.mp4', fps=30.0, frame_size=(480, 640)):
+def stack_videos(videos_list, grid=(2, 2), output='output.mp4', fps=30.0, frame_size=(480, 640)):
+    num_videos = len(videos_list)
     # Ensure there are enough videos for the grid
-    assert len(videos) == grid[0] * grid[1], "Number of videos does not match the grid size"
+    assert num_videos == grid[0] * grid[1], "Number of videos does not match the grid size"
 
     # Create a VideoWriter object
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output, fourcc, fps, (frame_size[1]*grid[1], frame_size[0]*grid[0]))
 
     # Create VideoCapture objects for each video
-    caps = [cv2.VideoCapture(video) for video in videos]
+    caps = []
+    cap_i = 0
+    while True:
+        none_count = 0
+        for i in range(num_videos):
+            videos = videos_list[i]
+            if cap_i < len(videos) and videos[cap_i] is not None:
+                caps.append(cv2.VideoCapture(videos[cap_i]))
+            else:
+                caps.append(None)
+                none_count += 1
+        cap_i += 1
+        if none_count >= num_videos:
+            break
 
     frame_num = 0
     last_frames = []
+    num_repeats = [0, 0, 0, 0]
+    change_delay_frame_num = CHANGE_DELAY * fps
     while True:
+        # print("Reading frames again")
         # Read a frame from each video
-        frames = [cap.read() for cap in caps]
+        frames = [cap.read() for cap_ind, cap in enumerate(caps) if cap_ind < num_videos]
+
 
         # If any frame was not read successfully, then we've reached the end
         incomplete_frame_count = 0
         for i, frame in enumerate(frames):
             if not frame[0]:
                 frames[i] = last_frames[i]
+                if num_repeats[i] >= change_delay_frame_num:
+                    next_cap_ind = i + num_videos
+                    while next_cap_ind < len(caps) and caps[next_cap_ind] is not None:
+                        caps[next_cap_ind - num_videos] = caps[next_cap_ind]
+                        next_cap_ind += num_videos
+                    num_repeats[i] = 0
+                else:
+                    num_repeats[i] += 1
                 incomplete_frame_count += 1
+        
         if incomplete_frame_count >= len(frames):
             duration = frame_num / fps
-            if duration >= VID_LEN:
+            if duration >= VID_LEN or (DEBUG and frame_num >= 900):
                 break
         
         last_frames = frames
@@ -55,7 +82,8 @@ def stack_videos(videos, grid=(2, 2), output='output.mp4', fps=30.0, frame_size=
 
     # Release everything
     for cap in caps:
-        cap.release()
+        if cap is not None:
+            cap.release()
     out.release()
     print("Finished writing")
 
@@ -68,10 +96,9 @@ def check_arguments():
         assert VID_LEN <= 59, "Video length too big for short"
 
 if __name__ == "__main__":
-
     if IS_SHORT:
         # stack 2 videos
-        stack_videos([VID_3, VID_4], grid=(2, 1), output=OUTPUT_PATH, fps=FPS, frame_size=(768, 768))
+        stack_videos([VID_3], grid=(1, 1), output=OUTPUT_PATH, fps=FPS, frame_size=(768, 768))
     else:
         # stack 4 videos
         stack_videos([VID_1, VID_2, VID_3, VID_4], grid=(2, 2), output=OUTPUT_PATH, fps=FPS, frame_size=(768, 768))
